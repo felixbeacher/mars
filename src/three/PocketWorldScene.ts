@@ -113,6 +113,11 @@ export class PocketWorldController {
   private lastPointerPos = new THREE.Vector2();
   private angularVelocity = new THREE.Vector2(0.0, 0.0);
 
+  // Dust storm & telemetry focus state
+  private dustStormIntensity = 0.0;
+  private targetPlanetQuat: THREE.Quaternion | null = null;
+  private isTransitioningQuat = false;
+
   // Initial 3-second 360-degree intro spin state
   private introSpinActive = true;
   private introSpinElapsed = 0;
@@ -1898,6 +1903,43 @@ export class PocketWorldController {
     }));
   }
 
+  public setDustStormIntensity(intensity: number) {
+    this.dustStormIntensity = THREE.MathUtils.clamp(intensity, 0, 1);
+  }
+
+  public focusOnRegion(regionName: string) {
+    if (this.tourActive) this.stopTour();
+    let targetDir = this.wellDirection.clone();
+    const lower = regionName.toLowerCase();
+    if (lower.includes('olympus')) {
+      targetDir = new THREE.Vector3(0.12, 0.88, -0.22).normalize();
+    } else if (lower.includes('valles')) {
+      targetDir = new THREE.Vector3(0.72, -0.08, 0.52).normalize();
+    } else if (lower.includes('jezero')) {
+      targetDir = new THREE.Vector3(0.42, 0.32, 0.85).normalize();
+    } else if (lower.includes('gale')) {
+      targetDir = new THREE.Vector3(-0.45, -0.15, 0.88).normalize();
+    } else if (lower.includes('elysium')) {
+      targetDir = new THREE.Vector3(-0.62, 0.45, -0.64).normalize();
+    } else if (lower.includes('chryse')) {
+      targetDir = new THREE.Vector3(0.25, 0.45, 0.85).normalize();
+    } else if (lower.includes('hellas')) {
+      targetDir = new THREE.Vector3(0.45, -0.65, -0.55).normalize();
+    } else if (lower.includes('north') || lower.includes('polar')) {
+      targetDir = new THREE.Vector3(0.05, 0.98, 0.05).normalize();
+    } else if (lower.includes('south')) {
+      targetDir = new THREE.Vector3(-0.05, -0.98, 0.05).normalize();
+    } else {
+      targetDir = this.wellDirection.clone();
+    }
+
+    const desiredFacing = new THREE.Vector3(0, 0.12, 1.0).normalize();
+    this.targetPlanetQuat = new THREE.Quaternion().setFromUnitVectors(targetDir, desiredFacing);
+    this.isTransitioningQuat = true;
+    this.angularVelocity.set(0, 0);
+    this.applyCameraPreset('orbit');
+  }
+
   public applyCameraPreset(view: CameraViewId, immediate = false) {
     this.activeView = view;
     if (view === 'orb') {
@@ -2667,6 +2709,8 @@ export class PocketWorldController {
     const onPointerDown = (e: PointerEvent) => {
       if (e.button !== 0 && e.button !== 2) return;
       if (this.tourActive) return;
+      this.isTransitioningQuat = false;
+      this.targetPlanetQuat = null;
       this.isPointerDown = true;
       this.isDraggingSpin = false;
       this.pointerDownPos.set(e.clientX, e.clientY);
@@ -2845,6 +2889,13 @@ export class PocketWorldController {
             .copy(this.camTargetLook)
             .addScaledVector(zoomDir, currentDist * 1.14);
         }
+      }
+    } else if (this.isTransitioningQuat && this.targetPlanetQuat && !this.isPointerDown && !this.tourActive) {
+      this.planetRoot.quaternion.slerp(this.targetPlanetQuat, Math.min(1.0, dt * 3.5));
+      if (this.planetRoot.quaternion.angleTo(this.targetPlanetQuat) < 0.02) {
+        this.planetRoot.quaternion.copy(this.targetPlanetQuat);
+        this.isTransitioningQuat = false;
+        this.targetPlanetQuat = null;
       }
     } else if (!this.isPointerDown && !this.tourActive) {
       // Planet rotational inertia when not actively dragging
@@ -3643,16 +3694,18 @@ export class PocketWorldController {
       }
     }
 
-    // 14. Update Drifting Fireflies inside the glass orb in Night / Twilight mode
-    const fireflyAlpha = Math.max(0, nightFactor * 0.92 + twilightFactor * 0.35);
-    this.firefliesMat.opacity = fireflyAlpha;
-    if (fireflyAlpha > 0.01) {
+    // 14. Update Drifting Fireflies & Atmospheric Dust nanites
+    const baseDustAlpha = Math.max(0, nightFactor * 0.92 + twilightFactor * 0.35);
+    const effectiveDustAlpha = Math.max(baseDustAlpha, this.dustStormIntensity * 0.92);
+    this.firefliesMat.opacity = effectiveDustAlpha;
+    if (effectiveDustAlpha > 0.01) {
       const posAttr = this.firefliesPoints.geometry.attributes.position;
+      const speedMult = 1.0 + this.dustStormIntensity * 3.5;
       for (let i = 0; i < this.firefliesBasePositions.length; i++) {
         const base = this.firefliesBasePositions[i];
-        const x = base.x + Math.sin(elapsed * 1.1 + i * 1.7) * 0.055;
-        const y = base.y + Math.cos(elapsed * 0.9 + i * 2.3) * 0.055;
-        const z = base.z + Math.sin(elapsed * 1.3 + i * 0.9) * 0.055;
+        const x = base.x + Math.sin(elapsed * 1.1 * speedMult + i * 1.7) * (0.055 + this.dustStormIntensity * 0.06);
+        const y = base.y + Math.cos(elapsed * 0.9 * speedMult + i * 2.3) * (0.055 + this.dustStormIntensity * 0.04);
+        const z = base.z + Math.sin(elapsed * 1.3 * speedMult + i * 0.9) * (0.055 + this.dustStormIntensity * 0.06);
         posAttr.setXYZ(i, x, y, z);
       }
       posAttr.needsUpdate = true;

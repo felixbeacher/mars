@@ -61,6 +61,23 @@ export interface WorldState {
   };
 }
 
+export type DustStormSeverity = 'advisory' | 'warning' | 'severe' | 'critical' | 'resolved';
+
+export interface DustStormAlert {
+  id: string;
+  sol: number;
+  marsTime: string;
+  severity: DustStormSeverity;
+  title: string;
+  message: string;
+  region: string;
+  windSpeed: number; // in m/s
+  tau: number; // optical atmospheric depth
+  timestamp: number;
+  triggerSource: string;
+  read?: boolean;
+}
+
 export interface ToolDefinition {
   id: ToolId;
   label: string;
